@@ -1,0 +1,193 @@
+# ============================================================
+#  Prédiction de la Durée de Remboursement d'un Crédit Immobilier
+#  Modèle : Régression Linéaire avec variables temporelles
+#  Contexte : Maroc (données simulées inspirées BAM + Kaggle)
+# ============================================================
+
+# ── 1. Importation des bibliothèques ──────────────────────────
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
+
+# Reproductibilité
+np.random.seed(42)
+
+# ── 2. Génération des données simulées ───────────────────────
+n = 500  # nombre d'observations
+
+data = {
+    # Montant du crédit en dirhams (200 000 à 2 000 000)
+    "montant_credit": np.random.randint(200_000, 2_000_001, n),
+
+    # Revenu mensuel net du client en dirhams (5 000 à 50 000)
+    "revenu_mensuel": np.random.randint(5_000, 50_001, n),
+
+    # Taux d'intérêt annuel (%) – fourchette BAM Maroc
+    "taux_interet": np.round(np.random.uniform(3.5, 7.5, n), 2),
+
+    # Âge du client (25 à 60 ans)
+    "age_client": np.random.randint(25, 61, n),
+
+    # Ancienneté professionnelle (années)
+    "anciennete_emploi": np.random.randint(1, 31, n),
+
+    # Type de bien : 0 = appartement, 1 = villa, 2 = terrain
+    "type_bien": np.random.randint(0, 3, n),
+
+    # Apport personnel (% du montant total, 10% à 40%)
+    "apport_pct": np.round(np.random.uniform(10, 40, n), 1),
+}
+
+df = pd.DataFrame(data)
+
+# ── Variable cible : durée de remboursement (en mois) ────────
+#  Logique métier simplifiée :
+#    durée ≈ f(montant, revenu, taux, apport)
+#  Plus le montant est élevé et le revenu faible → durée longue
+df["duree_remboursement"] = (
+    (df["montant_credit"] / df["revenu_mensuel"]) * 2.5
+    + df["taux_interet"] * 8
+    - df["apport_pct"] * 0.6
+    - df["anciennete_emploi"] * 0.4
+    + np.random.normal(0, 10, n)   # bruit réaliste
+).clip(12, 360).round().astype(int)   # entre 1 an et 30 ans
+
+print("✅ Données générées avec succès !")
+print(df.head())
+print(f"\nDimensions du dataset : {df.shape}")
+print(f"\nStatistiques descriptives :\n{df.describe().round(2)}")
+
+# ── 3. Exploration des données (EDA) ─────────────────────────
+fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+fig.suptitle("Exploration des données – Crédit Immobilier (Maroc)", fontsize=14, fontweight="bold")
+
+axes[0, 0].hist(df["duree_remboursement"], bins=30, color="steelblue", edgecolor="white")
+axes[0, 0].set_title("Distribution de la durée de remboursement")
+axes[0, 0].set_xlabel("Durée (mois)")
+
+axes[0, 1].scatter(df["montant_credit"], df["duree_remboursement"], alpha=0.4, color="coral")
+axes[0, 1].set_title("Montant vs Durée")
+axes[0, 1].set_xlabel("Montant (MAD)")
+
+axes[0, 2].scatter(df["revenu_mensuel"], df["duree_remboursement"], alpha=0.4, color="seagreen")
+axes[0, 2].set_title("Revenu vs Durée")
+axes[0, 2].set_xlabel("Revenu mensuel (MAD)")
+
+axes[1, 0].scatter(df["taux_interet"], df["duree_remboursement"], alpha=0.4, color="mediumpurple")
+axes[1, 0].set_title("Taux d'intérêt vs Durée")
+axes[1, 0].set_xlabel("Taux (%)")
+
+axes[1, 1].scatter(df["apport_pct"], df["duree_remboursement"], alpha=0.4, color="orange")
+axes[1, 1].set_title("Apport personnel vs Durée")
+axes[1, 1].set_xlabel("Apport (%)")
+
+axes[1, 2].scatter(df["age_client"], df["duree_remboursement"], alpha=0.4, color="tomato")
+axes[1, 2].set_title("Âge du client vs Durée")
+axes[1, 2].set_xlabel("Âge (ans)")
+
+plt.tight_layout()
+plt.savefig("exploration_donnees.png", dpi=150)
+plt.show()
+print("📊 Graphique EDA sauvegardé : exploration_donnees.png")
+
+# ── 4. Matrice de corrélation ─────────────────────────────────
+plt.figure(figsize=(9, 7))
+corr = df.corr()
+sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm", square=True,
+            linewidths=0.5, annot_kws={"size": 10})
+plt.title("Matrice de corrélation", fontsize=13, fontweight="bold")
+plt.tight_layout()
+plt.savefig("matrice_correlation.png", dpi=150)
+plt.show()
+print("📊 Matrice de corrélation sauvegardée : matrice_correlation.png")
+
+# ── 5. Préparation des données ────────────────────────────────
+features = ["montant_credit", "revenu_mensuel", "taux_interet",
+            "age_client", "anciennete_emploi", "type_bien", "apport_pct"]
+target   = "duree_remboursement"
+
+X = df[features]
+y = df[target]
+
+# Division train / test (80% / 20%)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Standardisation des variables
+scaler  = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test  = scaler.transform(X_test)
+
+print(f"\n✅ Train : {X_train.shape[0]} observations | Test : {X_test.shape[0]} observations")
+
+# ── 6. Entraînement du modèle ─────────────────────────────────
+model = LinearRegression()
+model.fit(X_train, y_train)
+print("\n✅ Modèle entraîné avec succès !")
+
+# ── 7. Évaluation du modèle ───────────────────────────────────
+y_pred = model.predict(X_test)
+
+mae  = mean_absolute_error(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+r2   = r2_score(y_test, y_pred)
+
+print("\n── Métriques de performance ──────────────────────────")
+print(f"  MAE  (Erreur absolue moyenne)  : {mae:.2f} mois")
+print(f"  RMSE (Erreur quadratique)      : {rmse:.2f} mois")
+print(f"  R²   (Coefficient de détermination) : {r2:.4f}")
+
+# ── 8. Visualisation Valeurs Réelles vs Prédites ─────────────
+plt.figure(figsize=(8, 6))
+plt.scatter(y_test, y_pred, alpha=0.5, color="steelblue", edgecolors="white", s=60)
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()],
+         "r--", linewidth=2, label="Prédiction parfaite")
+plt.xlabel("Durée réelle (mois)", fontsize=12)
+plt.ylabel("Durée prédite (mois)", fontsize=12)
+plt.title("Valeurs Réelles vs Valeurs Prédites", fontsize=13, fontweight="bold")
+plt.legend()
+plt.tight_layout()
+plt.savefig("prediction_vs_reel.png", dpi=150)
+plt.show()
+print("📊 Graphique comparatif sauvegardé : prediction_vs_reel.png")
+
+# ── 9. Importance des variables (coefficients) ───────────────
+coef_df = pd.DataFrame({
+    "Variable"   : features,
+    "Coefficient": model.coef_
+}).sort_values("Coefficient", key=abs, ascending=False)
+
+print("\n── Importance des variables (coefficients) ───────────")
+print(coef_df.to_string(index=False))
+
+plt.figure(figsize=(9, 5))
+colors = ["tomato" if c < 0 else "steelblue" for c in coef_df["Coefficient"]]
+plt.barh(coef_df["Variable"], coef_df["Coefficient"], color=colors, edgecolor="white")
+plt.axvline(0, color="black", linewidth=0.8)
+plt.xlabel("Valeur du coefficient", fontsize=12)
+plt.title("Importance des variables – Régression Linéaire", fontsize=13, fontweight="bold")
+plt.tight_layout()
+plt.savefig("importance_variables.png", dpi=150)
+plt.show()
+print("📊 Graphique d'importance sauvegardé : importance_variables.png")
+
+# ── 10. Exemple de prédiction ────────────────────────────────
+print("\n── Exemple de prédiction pour un nouveau client ──────")
+nouveau_client = pd.DataFrame([{
+    "montant_credit"  : 800_000,   # 800 000 MAD
+    "revenu_mensuel"  : 15_000,    # 15 000 MAD/mois
+    "taux_interet"    : 5.5,       # 5.5%
+    "age_client"      : 35,        # 35 ans
+    "anciennete_emploi": 8,        # 8 ans d'ancienneté
+    "type_bien"       : 0,         # appartement
+    "apport_pct"      : 20,        # 20% d'apport
+}])
+
+nouveau_client_scaled = scaler.transform(nouveau_client)
+prediction = model.predict(nouveau_client_scaled)[0]
+print(f"  Durée prédite : {prediction:.0f} mois ({prediction/12:.1f} ans)")
+print("\n✅ Analyse terminée avec succès !")
