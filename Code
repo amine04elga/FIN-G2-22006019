@@ -1,5 +1,5 @@
 pip install pandas numpy matplotlib seaborn scikit-learn
-```python credit_immobilier_regression.py
+python credit_immobilier_regression.py
 # ============================================================
 #  Prédiction de la Durée de Remboursement d'un Crédit Immobilier
 #  Modèle : Régression Linéaire avec variables temporelles
